@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 
@@ -20,7 +21,7 @@ import PrivateRoute from './utils/PrivateRoute';
 import ITStaffRoute from './utils/ITStaffRoute';
 
 
-function App() {
+function App(): React.ReactElement {
   return (
     <Routes>
       {/* Public routes that anyone can access */}

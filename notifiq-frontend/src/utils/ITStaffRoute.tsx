@@ -1,9 +1,9 @@
-import React, { useContext } from 'react';
+import React from 'react';
 import { Navigate, Outlet } from 'react-router-dom';
-import AuthContext from '../context/AuthContext';
+import { useAuth } from '../context/AuthContext';
 
-const ITStaffRoute = () => {
-    const { user } = useContext(AuthContext);
+const ITStaffRoute: React.FC = () => {
+    const { user } = useAuth();
 
     if (!user) {
         return <Navigate to="/login" />;

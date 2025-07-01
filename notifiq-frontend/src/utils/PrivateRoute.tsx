@@ -1,9 +1,9 @@
-import React, { useContext } from 'react';
+import React from 'react';
 import { Navigate, Outlet } from 'react-router-dom';
-import AuthContext from '../context/AuthContext';
+import { useAuth } from '../context/AuthContext';
 
-const PrivateRoute = () => {
-    let { user } = useContext(AuthContext);
+const PrivateRoute: React.FC = () => {
+    const { user } = useAuth();
 
     //Affects user logged in or redirect if not
     
