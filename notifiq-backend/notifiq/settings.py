@@ -1,5 +1,4 @@
 import os
-import dj_database_url
 from pathlib import Path
 from django.core.exceptions import ImproperlyConfigured
 
@@ -22,8 +21,6 @@ if not SECRET_KEY:
 DEBUG = os.getenv("DEBUG", "True") == "True"
 
 ALLOWED_HOSTS = [
-    '.up.railway.app',
-    'notifiq-backend-production.up.railway.app',
     'localhost',
     '127.0.0.1'
 ]
@@ -60,7 +57,7 @@ MIDDLEWARE = [
 ]
 
 CSRF_TRUSTED_ORIGINS = [
-    "https://notifiq-backend-production.up.railway.app"
+    # No cloud origins for local only
 ]
 
 
@@ -90,10 +87,10 @@ WSGI_APPLICATION = 'notifiq.wsgi.application'
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
 DATABASES = {
-    'default': dj_database_url.config(
-        default=os.environ.get('DATABASE_URL'),
-        conn_max_age=600
-    )
+    'default': {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'db.sqlite3',
+    }
 }
 
 

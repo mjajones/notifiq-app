@@ -23,8 +23,10 @@ export default function TicketForm() {
     const [agents, setAgents] = useState([]);
     const [agentsLoading, setAgentsLoading] = useState(true);
     const [agentsError, setAgentsError] = useState(null);
-    const { authTokens } = useContext(AuthContext);
-
+    const { authTokens, loading } = useContext(AuthContext);
+    const [allUsers, setAllUsers] = useState([]);
+    const [employees, setEmployees] = useState([]);
+    const [itStaff, setItStaff] = useState([]);
 
     const sourceOptions = ['Portal', 'Phone', 'Email', 'MS Teams', 'Slack', 'Employee Onboarding', 'Employee Offboarding'];
     const statusOptions = ['Open', 'In Progress', 'On Hold', 'Resolved', 'Closed'];
@@ -45,32 +47,45 @@ export default function TicketForm() {
         'Network': ['VPN Access', 'Wi-Fi Issue'],
     };
 
-
     useEffect(() => {
-        const fetchAgents = async () => {
-            if (!authTokens) {
-                setAgentsLoading(false);
-                return;
-            }
+        if (loading || !authTokens) return;
+        const fetchUsers = async () => {
+            setAgentsLoading(true);
             try {
-                const response = await fetch(`${API_URL}/api/users/?group=IT%20Staff`, {
+                // Fetch employees
+                const empRes = await fetch(`${API_URL}/api/users/employees/`, {
                     headers: {
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${authTokens.access}`
                     }
                 });
-                if (!response.ok) throw new Error('Failed to fetch users');
-                const data = await response.json();
-                setAgents(Array.isArray(data.results) ? data.results : Array.isArray(data) ? data : []);
+                if (!empRes.ok) throw new Error('Failed to fetch employees');
+                const employees = await empRes.json();
+                setEmployees(employees);
+
+                // Fetch IT Staff
+                const staffRes = await fetch(`${API_URL}/api/users/it-staff/`, {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${authTokens.access}`
+                    }
+                });
+                if (!staffRes.ok) throw new Error('Failed to fetch IT Staff');
+                const itStaff = await staffRes.json();
+                setItStaff(itStaff);
+
+                setAllUsers([...employees, ...itStaff]);
             } catch (error) {
                 setAgentsError(error.message);
-                setAgents([]);
+                setAllUsers([]);
+                setEmployees([]);
+                setItStaff([]);
             } finally {
                 setAgentsLoading(false);
             }
         };
-        fetchAgents();
-    }, [authTokens]);
+        fetchUsers();
+    }, [authTokens, loading]);
 
     const handleChange = (e) => {
         const { name, value } = e.target;
@@ -161,20 +176,27 @@ export default function TicketForm() {
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
-                        <label htmlFor="requester_name" className={labelClass}>Requester</label>
-                        <input id="requester_name" name="requester_name" type="text" value={formData.requester_name} onChange={handleChange} className={inputClass} placeholder="Search for an employee by name..." list="agents-list" required />
+                        <label htmlFor="requester_id" className={labelClass}>Requester</label>
+                        <select id="requester_id" name="requester_id" value={formData.requester_id || ""} onChange={e => {
+                            const emp = employees.find(emp => emp.id === parseInt(e.target.value));
+                            setFormData(prev => ({
+                                ...prev,
+                                requester_id: emp ? emp.id : "",
+                                requester_name: emp ? `${emp.first_name} ${emp.last_name}`.trim() : "",
+                                requester_email: emp ? emp.email : "",
+                            }));
+                        }} className={inputClass} required>
+                            <option value="">Select an employee...</option>
+                            {employees.map(emp => (
+                                <option key={emp.id} value={emp.id}>{emp.first_name} {emp.last_name}</option>
+                            ))}
+                        </select>
                     </div>
                     <div>
                         <label htmlFor="title" className={labelClass}>Subject</label>
                         <input id="title" name="title" type="text" value={formData.title} onChange={handleChange} className={inputClass} placeholder="A brief summary of the issue" required />
                     </div>
                 </div>
-
-                <datalist id="agents-list">
-                    {agents && agents.map(agent => (
-                        <option key={agent.id} value={`${agent.first_name} ${agent.last_name}`.trim() || agent.username} />
-                    ))}
-                </datalist>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     <div><label htmlFor="source" className={labelClass}>Source</label><select id="source" name="source" value={formData.source} onChange={handleChange} className={inputClass}>{sourceOptions.map((opt) => <option key={opt} value={opt}>{opt}</option>)}</select></div>
@@ -187,7 +209,15 @@ export default function TicketForm() {
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div><label htmlFor="group" className={labelClass}>Group</label><select id="group" name="group" value={formData.group} onChange={handleChange} className={inputClass}>{groupOptions.map((opt) => <option key={opt} value={opt}>{opt}</option>)}</select></div>
-                    <div><label htmlFor="agent" className={labelClass}>IT Support Agent</label><input id="agent" name="agent" type="text" value={formData.agent} onChange={handleChange} className={inputClass} placeholder="Search or select an agent..." list="agents-list" /></div>
+                    <div>
+                        <label htmlFor="agent" className={labelClass}>IT Support Agent</label>
+                        <select id="agent" name="agent" value={formData.agent} onChange={handleChange} className={inputClass} required>
+                            <option value="">Select an IT Staff...</option>
+                            {itStaff.map(agent => (
+                                <option key={agent.id} value={agent.username}>{agent.first_name} {agent.last_name}</option>
+                            ))}
+                        </select>
+                    </div>
                 </div>
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

@@ -1,12 +1,24 @@
-# React + Vite
+# NotifiQ - Local Development
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+This project is now set up for local development only.
 
-Currently, two official plugins are available:
+## Backend (Django)
+- Uses SQLite as the database (no cloud DB required).
+- To run locally:
+  1. Navigate to `notifiq-backend`.
+  2. (Optional) Create a virtual environment and activate it.
+  3. Install dependencies: `pip install -r requirements.txt`
+  4. Run migrations: `python manage.py migrate`
+  5. Start the server: `python manage.py runserver`
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Frontend (React + Vite)
+- To run locally:
+  1. Navigate to `notifiq-frontend`.
+  2. Install dependencies: `npm install`
+  3. Start the dev server: `npm run dev`
 
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## Notes
+- No cloud deployment (Railway, Vercel) is used or supported.
+- The backend API runs at `http://localhost:8000` by default.
+- The frontend runs at `http://localhost:5173` by default.
+- Make sure both servers are running for full functionality.

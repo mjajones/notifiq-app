@@ -30,6 +30,13 @@ class StatusLabelViewSet(viewsets.ModelViewSet):
     serializer_class = StatusLabelSerializer
     permission_classes = [permissions.IsAuthenticated]
 
+    def list(self, request, *args, **kwargs):
+        print("DEBUG: StatusLabelViewSet.list called")
+        queryset = self.get_queryset()
+        print(f"DEBUG: Found {queryset.count()} status labels")
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
 class MyTokenObtainPairView(TokenObtainPairView):
     serializer_class = MyTokenObtainPairSerializer
 
@@ -86,24 +93,6 @@ class IncidentViewSet(viewsets.ModelViewSet):
     filterset_fields = ['requester_email', 'agent', 'status__name']
 
     def get_queryset(self):
-        # This part of your code is correct and will be used by the new list method
-        user = self.request.user
-        is_staff = user.is_superuser or user.groups.filter(name='IT Staff').exists()
-        if is_staff:
-            return Incident.objects.all().order_by('-submitted_at')
-        if user.is_authenticated:
-            return Incident.objects.filter(requester_email=user.email).order_by('-submitted_at')
-        return Incident.objects.none()
-
-    # --- THIS IS THE NEW, OVERRIDING LIST METHOD ---
-class IncidentViewSet(viewsets.ModelViewSet):
-    serializer_class = IncidentSerializer
-    permission_classes = [permissions.IsAuthenticated]
-    parser_classes = (MultiPartParser, FormParser)
-    filter_backends = [DjangoFilterBackend]
-    filterset_fields = ['requester_email', 'agent', 'status__name']
-
-    def get_queryset(self):
         user = self.request.user
         is_staff = user.is_superuser or user.groups.filter(name='IT Staff').exists()
         if is_staff:
@@ -122,9 +111,12 @@ class IncidentViewSet(viewsets.ModelViewSet):
         return Response({'results': serializer.data})
 
     def perform_create(self, serializer):
-        serializer.save(requester_email=self.request.user.email)
+        # Set default status to "Open" if not provided
+        open_status = StatusLabel.objects.filter(name="Open").first()
+        serializer.save(requester_email=self.request.user.email, status=open_status)
 
     def partial_update(self, request, *args, **kwargs):
+        print("DEBUG: partial_update data:", request.data)
         incident = self.get_object()
         user = request.user
         data = request.data.copy()
@@ -168,26 +160,29 @@ class IncidentViewSet(viewsets.ModelViewSet):
         new_incident.save()
         serializer = self.get_serializer(new_incident)
 
-
 class UserViewSet(viewsets.ReadOnlyModelViewSet):
-
     serializer_class = UserSerializer
     permission_classes = [permissions.IsAuthenticated]
-
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['groups__name'] 
     search_fields = ['first_name', 'last_name', 'email'] 
 
     def get_queryset(self):
-        user = self.request.user
-        
-        is_authorized = user.is_superuser or user.groups.filter(name='IT Staff').exists()
-        
-        if self.action == 'list' and not is_authorized:
-            return User.objects.none()
-        
         return User.objects.all().order_by('first_name', 'last_name')
 
+    @action(detail=False, methods=['get'], url_path='employees')
+    def employees(self, request):
+        employees = User.objects.filter(groups__name="Employee").order_by('first_name', 'last_name')
+        serializer = self.get_serializer(employees, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'], url_path='it-staff')
+    def it_staff(self, request):
+        print("DEBUG: UserViewSet.it_staff called")
+        it_staff = User.objects.filter(groups__name="IT Staff").order_by('first_name', 'last_name')
+        print(f"DEBUG: Found {it_staff.count()} IT Staff users")
+        serializer = self.get_serializer(it_staff, many=True)
+        return Response(serializer.data)
 
 class AssetViewSet(viewsets.ModelViewSet):
     queryset = Asset.objects.all()

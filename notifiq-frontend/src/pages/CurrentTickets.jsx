@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo, useContext, useCallback, useRef } 
 import { Link } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { FaPlus, FaUserPlus, FaTimes, FaFileCsv, FaTrash, FaCopy } from 'react-icons/fa';
-import { FiChevronDown, FiSearch } from 'react-icons/fi';
+import { FiChevronDown, FiSearch, FiMoreVertical } from 'react-icons/fi';
 import AuthContext from '../context/AuthContext.jsx';
 import StatusSelector from '../components/ui/StatusSelector.jsx';
 import ConfirmationDialog from '../components/ui/ConfirmationDialog.jsx';
@@ -56,8 +56,19 @@ export default function CurrentTickets() {
     const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
     const [agentSearchTerm, setAgentSearchTerm] = useState("");
     const [isEditLabelsModalOpen, setIsEditLabelsModalOpen] = useState(false);
+    const [bulkStatus, setBulkStatus] = useState('');
+    const [bulkPriority, setBulkPriority] = useState('');
+    const [bulkTeam, setBulkTeam] = useState('');
+    const [bulkAgent, setBulkAgent] = useState('');
+    const [bulkTag, setBulkTag] = useState('');
+    const [bulkMove, setBulkMove] = useState('');
+    const [showBulkConfirm, setShowBulkConfirm] = useState(false);
+    const [pendingBulkAction, setPendingBulkAction] = useState(null);
+    const [tags, setTags] = useState([]);
+    const [showMenu, setShowMenu] = useState(null);
+    const [itStaff, setItStaff] = useState([]);
     
-    const { authTokens, user } = useContext(AuthContext);
+    const { authTokens, user, loading: authLoading } = useContext(AuthContext);
     const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
     const priorityOptions = [
@@ -71,14 +82,15 @@ export default function CurrentTickets() {
     const moveOptions = ['Unassigned Tickets', 'Open Tickets', 'Waiting for Response', 'Resolved Tickets'];
 
     const fetchData = useCallback(async () => {
-        if (!authTokens) return;
+        if (authLoading || !authTokens) return;
         setLoading(true);
         setError(null);
 
         try {
-            const [ticketsRes, usersRes, statusLabelsRes] = await Promise.all([
+            const [ticketsRes, usersRes, itStaffRes, statusLabelsRes] = await Promise.all([
                 fetch(`${API_URL}/api/incidents/`, { headers: { 'Authorization': `Bearer ${authTokens.access}` } }),
-                fetch(`${API_URL}/api/users/`, { headers: { 'Authorization': `Bearer ${authTokens.access}` } }),
+                fetch(`${API_URL}/api/users/employees/`, { headers: { 'Authorization': `Bearer ${authTokens.access}` } }),
+                fetch(`${API_URL}/api/users/it-staff/`, { headers: { 'Authorization': `Bearer ${authTokens.access}` } }),
                 fetch(`${API_URL}/api/status-labels/`, { headers: { 'Authorization': `Bearer ${authTokens.access}` } })
             ]);
 
@@ -92,6 +104,11 @@ export default function CurrentTickets() {
                 setAllEmployees(Array.isArray(data.results) ? data.results : Array.isArray(data) ? data : []);
             }
 
+            if (itStaffRes.ok) {
+                const data = await itStaffRes.json();
+                setItStaff(Array.isArray(data.results) ? data.results : Array.isArray(data) ? data : []);
+            }
+
             if (statusLabelsRes.ok) {
                 const data = await statusLabelsRes.json();
                 setStatusLabels(Array.isArray(data) ? data : Array.isArray(data.results) ? data.results : []);
@@ -101,11 +118,15 @@ export default function CurrentTickets() {
         } finally {
             setLoading(false);
         }
-    }, [authTokens, API_URL]);
+    }, [authTokens, API_URL, authLoading]);
 
     useEffect(() => {
         fetchData();
     }, [fetchData]);
+
+    useEffect(() => {
+        setTags(['Bug', 'Feature', 'Customer', 'Internal']);
+    }, []);
 
     const handleTicketUpdate = async (ticketId, field, value) => {
         setAssigningTicket(null);
@@ -210,7 +231,6 @@ export default function CurrentTickets() {
         return groups;
     }, [tickets]);
 
-    const itStaff = useMemo(() => allEmployees.filter(emp => emp.groups?.some(g => g.name === 'IT Staff') || emp.is_superuser), [allEmployees]);
     const filteredStaff = itStaff.filter(staff => {
         const fullName = `${staff.first_name} ${staff.last_name}`.trim().toLowerCase();
         return fullName.includes(agentSearchTerm.toLowerCase()) || staff.username.toLowerCase().includes(agentSearchTerm.toLowerCase());
@@ -228,80 +248,262 @@ export default function CurrentTickets() {
         return (agent.username?.substring(0, 2) || 'NA').toUpperCase();
     };
 
-    if (loading) return <p className="p-4 text-text-secondary">Loading tickets...</p>;
-    if (error) return <p className="p-4 text-red-500">{error}</p>;
+    const handleBulkApply = async () => {
+        if (["Archive", "Spam", "Trash"].includes(bulkMove)) {
+            setShowBulkConfirm(true);
+            setPendingBulkAction(() => doBulkApply);
+            return;
+        }
+        await doBulkApply();
+    };
 
-    return (
-        <div className="space-y-8">
-            <ConfirmationDialog open={isConfirmingDelete} onClose={() => setIsConfirmingDelete(false)} onConfirm={handleDeleteSelected} title="Delete Tickets">
-                Are you sure you want to delete {selectedTickets.length} selected ticket(s)? This action cannot be undone.
-            </ConfirmationDialog>
-            <datalist id="employee-list">
-                {allEmployees.map(employee => (<option key={employee.id} value={`${employee.first_name} ${employee.last_name}`.trim() || employee.username} />))}
-            </datalist>
-            <EditLabelsModal open={isEditLabelsModalOpen} onClose={() => setIsEditLabelsModalOpen(false)} labels={statusLabels} onCreate={handleLabelCreate} onUpdate={handleLabelUpdate} onDelete={handleLabelDelete} />
-            
-            {assigningTicket && (<AgentDropdownMenu options={filteredStaff} onSelect={(agentId) => handleTicketUpdate(assigningTicket.id, 'agent', agentId)} onClose={() => setAssigningTicket(null)} targetRect={assigningTicket.rect} searchTerm={agentSearchTerm} onSearchChange={(e) => setAgentSearchTerm(e.target.value)}/>)}
+    const doBulkApply = async () => {
+        const updates = selectedTickets.map(id => {
+            const formData = new FormData();
+            if (bulkStatus) {
+                const statusObj = statusLabels.find(l => l.name === bulkStatus);
+                if (statusObj) formData.append('status_id', statusObj.id);
+            }
+            if (bulkPriority) formData.append('priority', bulkPriority);
+            if (bulkTeam) formData.append('group', bulkTeam);
+            if (bulkAgent) formData.append('agent_id', bulkAgent);
+            if (bulkTag) formData.append('tags', JSON.stringify([bulkTag]));
+            if (bulkMove) formData.append('folder', bulkMove);
+            return fetch(`${API_URL}/api/incidents/${id}/`, { method: 'PATCH', headers: { 'Authorization': `Bearer ${authTokens.access}` }, body: formData });
+        });
+        await Promise.all(updates);
+        await fetchData();
+        setSelectedTickets([]);
+        setBulkStatus(''); setBulkPriority(''); setBulkTeam(''); setBulkAgent(''); setBulkTag(''); setBulkMove('');
+        setShowBulkConfirm(false);
+    };
 
-            <header><h1 className="text-3xl font-bold text-text-primary">{isITStaff ? 'All Tickets' : 'My Tickets'}</h1></header>
+    const handleMenuAction = async (ticketId, action, value) => {
+        if (["Archive", "Spam", "Trash"].includes(action)) {
+            if (!window.confirm(`Are you sure you want to move this ticket to ${action}?`)) return;
+        }
+        const formData = new FormData();
+        if (["Open", "Pending", "On Hold", "Solved", "Closed"].includes(action)) {
+            const statusObj = statusLabels.find(l => l.name === action);
+            if (statusObj) formData.append('status_id', statusObj.id);
+        }
+        if (["Low", "Medium", "High", "Urgent"].includes(action)) formData.append('priority', action);
+        if (["Archive", "Spam", "Trash"].includes(action)) formData.append('folder', action);
+        if (action === 'Assign Agent' && value) formData.append('agent_id', value);
+        await fetch(`${API_URL}/api/incidents/${ticketId}/`, { method: 'PATCH', headers: { 'Authorization': `Bearer ${authTokens.access}` }, body: formData });
+        await fetchData();
+    };
 
-            {Object.entries(allTicketGroups).map(([groupName, groupTickets]) => (
-                <div key={groupName}>
-                    <h2 className={`text-sm font-bold mb-2 uppercase tracking-wider ${ groupName === 'Unassigned Tickets' ? 'text-red-600' : groupName === 'Open Tickets' ? 'text-blue-600' : groupName === 'Waiting for Response' ? 'text-purple-600' : 'text-green-600' }`}>{groupName} ({groupTickets.length})</h2>
-                    <div className="bg-foreground rounded-lg border border-border shadow-sm text-sm">
-                        <div className="overflow-x-auto">
-                            <div className="min-w-[1200px]">
-                                <div className="grid grid-cols-[auto_1fr_3fr_2fr_1fr_1.5fr_1.5fr_1fr_1.5fr] text-xs font-semibold text-text-secondary border-b border-border">
-                                    <div className="p-2 pl-4 w-12"><input type="checkbox" className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary" onChange={(e) => { if (e.target.checked) { setSelectedTickets(prev => [...new Set([...prev, ...groupTickets.map(t => t.id)])]); } else { setSelectedTickets(prev => prev.filter(id => !groupTickets.some(t => t.id === id))); } }}/></div>
-                                    <div className="p-2 border-l border-border">ID</div>
-                                    <div className="p-2 border-l border-border">Ticket</div>
-                                    <div className="p-2 border-l border-border">Employee</div>
-                                    <div className="p-2 border-l border-border text-center">Agent</div>
-                                    <div className="p-2 border-l border-border">Status</div>
-                                    <div className="p-2 border-l border-border">Priority</div>
-                                    <div className="p-2 border-l border-border">Category</div>
-                                    <div className="p-2 border-l border-border">Creation Date</div>
-                                </div>
-                                <div>
-                                    {groupTickets.map(ticket => {
-                                        const agentInfo = allEmployees.find(staff => staff.id === ticket.agent?.id);
-                                        const statusAsOptions = statusLabels.map(s => ({ value: s.id, label: s.name, color: s.color }));
-                                        return (
-                                            <div key={ticket.id} className="grid grid-cols-[auto_1fr_3fr_2fr_1fr_1.5fr_1.5fr_1fr_1.5fr] items-center border-t border-border hover:bg-gray-50/50">
-                                                <div className="p-2 pl-4 text-center"><input type="checkbox" checked={selectedTickets.includes(ticket.id)} onChange={() => handleSelectTicket(ticket.id)} className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary" /></div>
-                                                <div className="p-2 border-l border-border font-medium text-gray-400">{ticket.id}</div>
-                                                <div className="p-2 border-l border-border font-medium text-text-primary"><Link to={`/tickets/${ticket.id}`} className="hover:underline">{ticket.title}</Link></div>
-                                                <div className="p-2 border-l border-border"><input type="text" defaultValue={ticket.requester_name} onBlur={(e) => handleTicketUpdate(ticket.id, 'requester_name', e.target.value)} className="w-full bg-transparent p-1 -ml-1 rounded-md focus:outline-none focus:ring-1 focus:ring-primary" placeholder="Enter or search employee" list="employee-list"/></div>
-                                                <div className="p-2 border-l border-border flex items-center justify-center"><button onClick={(e) => { const rect = e.currentTarget.getBoundingClientRect(); setAssigningTicket({ id: ticket.id, rect: rect }); setAgentSearchTerm(""); }} className="w-8 h-8 rounded-full bg-gray-200 text-gray-500 flex items-center justify-center text-xs font-bold hover:bg-primary hover:text-white transition-colors" title={agentInfo ? `${agentInfo.first_name} ${agentInfo.last_name}`.trim() || agentInfo.username : "Assign Agent"}>
-                                                    {getAgentInitials(ticket.agent)}</button>
-                                                </div>
-                                                <div className="p-2 border-l border-border"><StatusSelector options={statusAsOptions} value={ticket.status?.id} onChange={(newValue) => handleTicketUpdate(ticket.id, 'status_id', newValue)} onEditLabels={() => setIsEditLabelsModalOpen(true)} /></div>
-                                                <div className="p-2 border-l border-border"><StatusSelector options={priorityOptions} value={ticket.priority} onChange={(newValue) => handleTicketUpdate(ticket.id, 'priority', newValue)} /></div>
-                                                <div className="p-2 border-l border-border text-text-secondary">{ticket.category}</div>
-                                                <div className="p-2 border-l border-border text-text-secondary">{new Date(ticket.submitted_at).toLocaleDateString()}</div>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-                        </div>
-                        <div className="border-t border-border p-2 pl-4 md:pl-12"><Link to="/tickets/create" className="flex items-center gap-2 text-text-secondary hover:text-primary text-sm"><FaPlus size={12} /> Add Ticket</Link></div>
-                    </div>
-                </div>
-            ))}
-            {selectedTickets.length > 0 && ( <div className="fixed bottom-5 left-1/2 -translate-x-1/2 bg-gray-800 text-white p-2 rounded-lg shadow-2xl flex items-center gap-4 z-40 text-sm">
-                <span className="font-bold px-2">{selectedTickets.length} selected</span>
-                <div className="h-6 w-px bg-gray-600"></div>
-                <button onClick={handleDuplicateSelected} className="flex items-center gap-2 hover:bg-gray-700 p-2 rounded-md"><FaCopy /> Duplicate</button>
-                <button onClick={handleExportSelected} className="flex items-center gap-2 hover:bg-gray-700 p-2 rounded-md"><FaFileCsv /> Export CSV</button>
-                <button onClick={() => setIsConfirmingDelete(true)} className="flex items-center gap-2 text-red-400 hover:bg-red-500 hover:text-white p-2 rounded-md"><FaTrash /> Delete</button>
+    // Debug: log allEmployees and itStaff structure
+    console.log('allEmployees:', allEmployees);
+    console.log('itStaff:', itStaff);
+
+    // --- Custom Tickets Sidebar ---
+    const ticketsSidebar = (
+        <aside className="w-72 min-w-[16rem] max-w-xs bg-white border-r border-border h-full flex flex-col">
+            <div className="flex items-center justify-between px-4 py-4 border-b border-border">
+                <h2 className="text-xl font-bold text-text-primary">Tickets</h2>
+                <Link to="/tickets/create" className="bg-primary text-white px-3 py-1.5 rounded-md flex items-center gap-2 hover:bg-primary-hover">
+                    <FaPlus /> <span className="font-semibold">New ticket</span>
+                </Link>
+            </div>
+            <div className="p-4 border-b border-border">
                 <div className="relative">
-                    <button onClick={() => setIsMoveMenuOpen(!isMoveMenuOpen)} className="flex items-center gap-2 hover:bg-gray-700 p-2 rounded-md">Move to <FiChevronDown /></button>
-                    {isMoveMenuOpen && ( <div className="absolute bottom-full mb-2 w-48 bg-white text-gray-800 border border-border rounded-md shadow-lg z-50"><ul>{moveOptions.map(opt => (<li key={opt} onClick={() => { handleBulkMove(opt); }} className="px-3 py-2 hover:bg-gray-100 cursor-pointer">{opt}</li>))}</ul></div> )}
+                    <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input type="text" placeholder="Search in all tickets..." className="w-full bg-gray-100 p-2 pl-9 rounded-md focus:outline-none focus:ring-1 focus:ring-primary" />
                 </div>
-                <div className="h-6 w-px bg-gray-600"></div>
-                <button onClick={() => setSelectedTickets([])} className="hover:bg-gray-700 p-2 rounded-full"><FaTimes /></button>
-            </div>)}
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 space-y-6">
+                <div>
+                    <div className="text-xs font-semibold text-text-secondary mb-2">TICKET VIEWS</div>
+                    <ul className="space-y-1">
+                        <li><Link to="#" className="block px-2 py-1 rounded hover:bg-gray-100">All recent tickets</Link></li>
+                        <li><Link to="#" className="block px-2 py-1 rounded hover:bg-gray-100">Tickets to handle</Link></li>
+                        <li><Link to="#" className="block px-2 py-1 rounded hover:bg-gray-100">My open tickets</Link></li>
+                        <li><Link to="#" className="block px-2 py-1 rounded hover:bg-gray-100">My tickets in last 7 days</Link></li>
+                        <li><button className="text-primary text-xs ml-2">Manage</button></li>
+                    </ul>
+                </div>
+                <div>
+                    <div className="text-xs font-semibold text-text-secondary mb-2">STATUSES</div>
+                    <ul className="space-y-1">
+                        <li><Link to="#" className="block px-2 py-1 rounded hover:bg-gray-100 flex items-center justify-between">Open <span className="text-xs bg-gray-200 rounded px-2">4</span></Link></li>
+                        <li><Link to="#" className="block px-2 py-1 rounded hover:bg-gray-100 flex items-center justify-between">Pending <span className="text-xs bg-gray-200 rounded px-2">0</span></Link></li>
+                        <li><Link to="#" className="block px-2 py-1 rounded hover:bg-gray-100 flex items-center justify-between">On hold <span className="text-xs bg-gray-200 rounded px-2">0</span></Link></li>
+                        <li><Link to="#" className="block px-2 py-1 rounded hover:bg-gray-100 flex items-center justify-between">Solved <span className="text-xs bg-gray-200 rounded px-2">0</span></Link></li>
+                        <li><Link to="#" className="block px-2 py-1 rounded hover:bg-gray-100 flex items-center justify-between">Closed <span className="text-xs bg-gray-200 rounded px-2">0</span></Link></li>
+                    </ul>
+                </div>
+                <div>
+                    <div className="text-xs font-semibold text-text-secondary mb-2">FOLDERS</div>
+                    <ul className="space-y-1">
+                        <li><Link to="#" className="block px-2 py-1 rounded hover:bg-gray-100">Archive</Link></li>
+                        <li><Link to="#" className="block px-2 py-1 rounded hover:bg-gray-100">Spam</Link></li>
+                        <li><Link to="#" className="block px-2 py-1 rounded hover:bg-gray-100">Trash</Link></li>
+                    </ul>
+                </div>
+            </div>
+        </aside>
+    );
+
+    // --- Main Tickets Page Layout ---
+    return (
+        <div className="flex h-[calc(100vh-0px)]">
+            {ticketsSidebar}
+            <main className="flex-1 overflow-x-auto">
+                <div className="p-6 bg-gray-100 min-h-screen">
+                    <div className="flex items-center justify-between mb-4">
+                        <h1 className="text-2xl font-bold">Open</h1>
+                        <div className="flex items-center gap-2">
+                            <button className="bg-white border border-border rounded px-3 py-1 text-sm font-medium flex items-center gap-2 hover:bg-gray-50">
+                                + Add filter
+                            </button>
+                            <span className="text-xs text-text-secondary ml-2">{tickets.length} tickets</span>
+                        </div>
+                    </div>
+                    <div className="bg-white rounded-lg shadow border border-border overflow-x-auto">
+                        <table className="min-w-full divide-y divide-border">
+                            <thead className="bg-white">
+                                <tr>
+                                    <th className="px-2 py-3 text-left text-xs font-semibold text-text-secondary">
+                                        <input type="checkbox" checked={selectedTickets.length === tickets.length && tickets.length > 0} onChange={e => setSelectedTickets(e.target.checked ? tickets.map(t => t.id) : [])} />
+                                    </th>
+                                    <th className="px-2 py-3 text-left text-xs font-semibold text-text-secondary">REQUESTER</th>
+                                    <th className="px-2 py-3 text-left text-xs font-semibold text-text-secondary">SUBJECT</th>
+                                    <th className="px-2 py-3 text-left text-xs font-semibold text-text-secondary">AGENT</th>
+                                    <th className="px-2 py-3 text-left text-xs font-semibold text-text-secondary">STATUS</th>
+                                    <th className="px-2 py-3 text-left text-xs font-semibold text-text-secondary">LAST MESSAGE <span className="inline-block align-middle">↓</span></th>
+                                    <th className="px-2 py-3"></th>
+                                </tr>
+                            </thead>
+                            <tbody className="bg-white divide-y divide-border">
+                                {tickets.map(ticket => {
+                                    const requester = allEmployees.find(emp => emp.email === ticket.requester_email);
+                                    const agent = allEmployees.find(emp => emp.id === ticket.agent?.id);
+                                    return (
+                                        <tr key={ticket.id} className="hover:bg-gray-50">
+                                            <td className="px-2 py-2">
+                                                <input type="checkbox" checked={selectedTickets.includes(ticket.id)} onChange={() => handleSelectTicket(ticket.id)} />
+                                            </td>
+                                            <td className="px-2 py-2">
+                                                <div className="flex items-center gap-2">
+                                                    <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center font-bold text-indigo-600 text-sm">
+                                                        {requester ? ((requester.first_name?.[0] || '') + (requester.last_name?.[0] || '')).toUpperCase() : (ticket.requester_name?.[0] || 'U').toUpperCase()}
+                                                    </div>
+                                                    <div>
+                                                        <div className="font-medium text-text-primary text-sm">{requester ? `${requester.first_name} ${requester.last_name}` : ticket.requester_name || 'Unknown'}</div>
+                                                        <div className="text-xs text-text-secondary">{requester ? requester.email : ticket.requester_email}</div>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                            <td className="px-2 py-2">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-xs text-gray-400">●</span>
+                                                    <span className="font-medium text-text-primary">{ticket.title}</span>
+                                                </div>
+                                            </td>
+                                            <td className="px-2 py-2">
+                                                {ticket.agent
+                                                    ? `${ticket.agent.first_name} ${ticket.agent.last_name}`
+                                                    : 'unassigned'}
+                                            </td>
+                                            <td className="px-2 py-2">
+                                                <button
+                                                    className="bg-blue-100 text-blue-600 px-3 py-1 rounded-full text-xs font-semibold hover:bg-blue-200"
+                                                    onClick={async () => {
+                                                        // Find the next status (toggle Open/Pending for demo, or use a menu for all options)
+                                                        const nextStatusName = ticket.status?.name === 'Open' ? 'Pending' : 'Open';
+                                                        const nextStatus = statusLabels.find(l => l.name === nextStatusName);
+                                                        if (nextStatus) {
+                                                            const formData = new FormData();
+                                                            formData.append('status_id', nextStatus.id);
+                                                            await fetch(`${API_URL}/api/incidents/${ticket.id}/`, {
+                                                                method: 'PATCH',
+                                                                headers: { 'Authorization': `Bearer ${authTokens.access}` },
+                                                                body: formData
+                                                            });
+                                                            await fetchData();
+                                                        }
+                                                    }}
+                                                >
+                                                    {ticket.status?.name || 'Open'}
+                                                </button>
+                                            </td>
+                                            <td className="px-2 py-2 text-xs text-text-secondary">{ticket.submitted_at ? new Date(ticket.submitted_at).toLocaleDateString() : ''}</td>
+                                            <td className="px-2 text-right relative">
+                                                <button onClick={() => setShowMenu(ticket.id)} className="p-2 rounded hover:bg-gray-100"><FiMoreVertical /></button>
+                                                {showMenu === ticket.id && (
+                                                    <div className="absolute right-0 mt-2 w-48 bg-white border border-border rounded shadow-lg z-50">
+                                                        {['Urgent', 'High', 'Medium', 'Low'].map(priority => (
+                                                            <button key={priority} className="block w-full text-left px-4 py-2 hover:bg-gray-100" onClick={async () => { await handleMenuAction(ticket.id, priority); await fetchData(); }}>
+                                                                Set priority to {priority}
+                                                            </button>
+                                                        ))}
+                                                        <hr />
+                                                        {['Open', 'Pending', 'On Hold', 'Solved', 'Closed'].map(status => (
+                                                            <button key={status} className="block w-full text-left px-4 py-2 hover:bg-gray-100" onClick={async () => { await handleMenuAction(ticket.id, status); await fetchData(); }}>
+                                                                Set as {status}
+                                                            </button>
+                                                        ))}
+                                                        <hr />
+                                                        {['Archive', 'Spam', 'Trash'].map(folder => (
+                                                            <button key={folder} className="block w-full text-left px-4 py-2 hover:bg-gray-100 text-red-600" onClick={async () => { await handleMenuAction(ticket.id, folder); await fetchData(); }}>
+                                                                Move to {folder}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                    {selectedTickets.length > 0 && (
+                      <div className="flex items-center gap-4 bg-gray-100 p-3 rounded-md mb-4 border border-border">
+                        <select value={bulkStatus} onChange={e => setBulkStatus(e.target.value)} className="p-2 rounded border">
+                          <option value="">Set status...</option>
+                          <option value="Open">Open</option>
+                          <option value="Pending">Pending</option>
+                          <option value="On Hold">On Hold</option>
+                          <option value="Solved">Solved</option>
+                          <option value="Closed">Closed</option>
+                        </select>
+                        <select value={bulkPriority} onChange={e => setBulkPriority(e.target.value)} className="p-2 rounded border">
+                          <option value="">Set priority...</option>
+                          <option value="Low">Low</option>
+                          <option value="Medium">Medium</option>
+                          <option value="High">High</option>
+                          <option value="Urgent">Urgent</option>
+                        </select>
+                        <select value={bulkTeam} onChange={e => setBulkTeam(e.target.value)} className="p-2 rounded border">
+                          <option value="">Assign team...</option>
+                          <option value="Level 1 Helpdesk">Level 1 Helpdesk</option>
+                          <option value="Level 2 Helpdesk">Level 2 Helpdesk</option>
+                          <option value="Level 3 Helpdesk">Level 3 Helpdesk</option>
+                        </select>
+                        <select value={bulkAgent} onChange={e => setBulkAgent(e.target.value)} className="p-2 rounded border">
+                          <option value="">Assign agent...</option>
+                          {itStaff.map(agent => (
+                            <option key={agent.id} value={agent.id}>{agent.first_name} {agent.last_name}</option>
+                          ))}
+                        </select>
+                        <select value={bulkTag} onChange={e => setBulkTag(e.target.value)} className="p-2 rounded border">
+                          <option value="">Add tag...</option>
+                          {tags.map(tag => <option key={tag} value={tag}>{tag}</option>)}
+                        </select>
+                        <select value={bulkMove} onChange={e => setBulkMove(e.target.value)} className="p-2 rounded border">
+                          <option value="">Move to...</option>
+                          <option value="Archive">Archive</option>
+                          <option value="Spam">Spam</option>
+                          <option value="Trash">Trash</option>
+                        </select>
+                        <button onClick={handleBulkApply} className="bg-primary text-white px-4 py-2 rounded hover:bg-primary-dark">Apply</button>
+                      </div>
+                    )}
+                </div>
+            </main>
         </div>
     );
 }

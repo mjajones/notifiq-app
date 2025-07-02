@@ -98,17 +98,17 @@ export default function Dashboard() {
     const [employees, setEmployees] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-    const { authTokens, user } = useContext(AuthContext);
+    const { authTokens, user, loading: authLoading } = useContext(AuthContext);
     
     const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
     useEffect(() => {
+        if (authLoading || !authTokens) return;
         const fetchData = async () => {
-            if (!authTokens) return;
             try {
                 const [ticketsRes, usersRes] = await Promise.all([
                     fetch(`${API_URL}/api/incidents/`, { headers: { 'Authorization': `Bearer ${authTokens.access}` } }),
-                    fetch(`${API_URL}/api/users/`, { headers: { 'Authorization': `Bearer ${authTokens.access}` } })
+                    fetch(`${API_URL}/api/users/employees/`, { headers: { 'Authorization': `Bearer ${authTokens.access}` } })
                 ]);
                 const ticketsData = await ticketsRes.json();
                 const usersData = await usersRes.json();
@@ -125,7 +125,7 @@ export default function Dashboard() {
             }
         };
         fetchData();
-    }, [authTokens, API_URL]);
+    }, [authTokens, API_URL, authLoading]);
 
     const stats = useMemo(() => {
         const openTickets = tickets.filter(t => t.status?.name !== 'Resolved' && t.status?.name !== 'Closed');

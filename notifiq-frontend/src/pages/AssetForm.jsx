@@ -14,7 +14,7 @@ export default function AssetForm() {
     });
     const [itStaff, setItStaff] = useState([]);
     const [message, setMessage] = useState('');
-    const { authTokens } = useContext(AuthContext);
+    const { authTokens, loading } = useContext(AuthContext);
 
     // All options
     const assetTypeOptions = [
@@ -30,10 +30,10 @@ export default function AssetForm() {
 
     // Fetch IT staff
     useEffect(() => {
+        if (loading || !authTokens) return;
         const fetchItStaff = async () => {
-            if (!authTokens) return;
             try {
-                const response = await fetch(`${API_URL}/api/users/?group=IT%20Staff`, {
+                const response = await fetch(`${API_URL}/api/users/it-staff/`, {
                     headers: {
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${authTokens.access}`
@@ -41,13 +41,13 @@ export default function AssetForm() {
                 });
                 if (!response.ok) throw new Error('Failed to fetch IT staff');
                 const data = await response.json();
-                setItStaff(Array.isArray(data.results) ? data.results : Array.isArray(data) ? data : []);
+                setItStaff(Array.isArray(data) ? data : []);
             } catch (error) {
                 console.error("Error fetching IT staff:", error);
             }
         };
         fetchItStaff();
-    }, [authTokens]);
+    }, [authTokens, loading]);
 
 
     const handleChange = (e) => {

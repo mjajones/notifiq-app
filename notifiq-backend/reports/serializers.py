@@ -25,7 +25,11 @@ class GroupSerializer(serializers.ModelSerializer):
         fields = ['name']
 
 class UserSerializer(serializers.ModelSerializer):
-    groups = GroupSerializer(many=True, read_only=True)
+    groups = serializers.SlugRelatedField(
+        many=True,
+        read_only=True,
+        slug_field='name'
+    )
     class Meta:
         model = User
         fields = ['id', 'username', 'first_name', 'last_name', 'email', 'groups', 'is_superuser']
