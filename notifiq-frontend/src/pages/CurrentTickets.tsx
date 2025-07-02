@@ -1,15 +1,26 @@
-import React, { useEffect, useState, useMemo, useContext, useCallback, useRef } from 'react';
+import { useEffect, useState, useMemo, useCallback, useRef, FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { FaPlus, FaUserPlus, FaTimes, FaFileCsv, FaTrash, FaCopy } from 'react-icons/fa';
 import { FiChevronDown, FiSearch, FiMoreVertical } from 'react-icons/fi';
-import AuthContext from '../context/AuthContext.jsx';
-import StatusSelector from '../components/ui/StatusSelector.jsx';
-import ConfirmationDialog from '../components/ui/ConfirmationDialog.jsx';
-import EditLabelsModal from '../components/ui/EditLabelsModal.jsx';
+import { useAuth } from '../context/AuthContext';
+import StatusSelector from '../components/ui/StatusSelector';
+import ConfirmationDialog from '../components/ui/ConfirmationDialog';
+import EditLabelsModal from '../components/ui/EditLabelsModal';
+import { Ticket, Employee, TicketStatus, Message } from '../types';
+import { StatusSelectorDropdownProps } from '../types/ui';
 
-function AgentDropdownMenu({ options, onSelect, onClose, targetRect, searchTerm, onSearchChange }) {
-    const dropdownRef = useRef(null);
+interface AgentDropdownMenuProps {
+    options: Employee[];
+    onSelect: (agentId: number) => void;
+    onClose: () => void;
+    targetRect: DOMRect | null;
+    searchTerm?: string;
+    onSearchChange?: (value: string) => void;
+}
+
+function AgentDropdownMenu({ options, onSelect, onClose, targetRect, searchTerm, onSearchChange }: AgentDropdownMenuProps) {
+    const dropdownRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         const dropdownEl = dropdownRef.current;
@@ -26,8 +37,8 @@ function AgentDropdownMenu({ options, onSelect, onClose, targetRect, searchTerm,
     }, [targetRect]);
 
     useEffect(() => {
-        const handleClickOutside = (event) => {
-            if (dropdownRef.current && !dropdownRef.current.contains(event.target)) onClose();
+        const handleClickOutside = (event: MouseEvent) => {
+            if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) onClose();
         };
         document.addEventListener("mousedown", handleClickOutside);
         return () => document.removeEventListener("mousedown", handleClickOutside);
@@ -36,7 +47,7 @@ function AgentDropdownMenu({ options, onSelect, onClose, targetRect, searchTerm,
     return createPortal(
         <div ref={dropdownRef} className="fixed z-50 text-left">
             <div className="w-full bg-white border border-border rounded-md shadow-lg">
-                <div className="p-2 border-b"><div className="relative"><FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" /><input type="text" placeholder="Search names..." className="w-full bg-gray-100 p-2 pl-9 rounded-md focus:outline-none focus:ring-1 focus:ring-primary" value={searchTerm} onChange={onSearchChange} autoFocus /></div></div>
+                <div className="p-2 border-b"><div className="relative"><FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" /><input type="text" placeholder="Search names..." className="w-full bg-gray-100 p-2 pl-9 rounded-md focus:outline-none focus:ring-1 focus:ring-primary" value={searchTerm} onChange={(e) => onSearchChange?.(e.target.value)} autoFocus /></div></div>
                 <ul className="max-h-48 overflow-y-auto">{options.length > 0 ? (options.map(staff => (<li key={staff.id} onClick={() => onSelect(staff.id)} className="px-3 py-2 hover:bg-gray-100 cursor-pointer font-normal">{`${staff.first_name} ${staff.last_name}`.trim() || staff.username}</li>))) : (<li className="px-3 py-2 text-gray-500 font-normal">No results found.</li>)}</ul>
             </div>
         </div>,
@@ -45,13 +56,13 @@ function AgentDropdownMenu({ options, onSelect, onClose, targetRect, searchTerm,
 }
 
 export default function CurrentTickets() {
-    const [tickets, setTickets] = useState([]);
-    const [allEmployees, setAllEmployees] = useState([]);
-    const [statusLabels, setStatusLabels] = useState([]);
+    const [tickets, setTickets] = useState<Ticket[]>([]);
+    const [allEmployees, setAllEmployees] = useState<Employee[]>([]);
+    const [statusLabels, setStatusLabels] = useState<TicketStatus[]>([]);
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
-    const [assigningTicket, setAssigningTicket] = useState(null);
-    const [selectedTickets, setSelectedTickets] = useState([]);
+    const [error, setError] = useState<string | null>(null);
+    const [assigningTicket, setAssigningTicket] = useState<number | null>(null);
+    const [selectedTickets, setSelectedTickets] = useState<number[]>([]);
     const [isMoveMenuOpen, setIsMoveMenuOpen] = useState(false);
     const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
     const [agentSearchTerm, setAgentSearchTerm] = useState("");
@@ -63,12 +74,12 @@ export default function CurrentTickets() {
     const [bulkTag, setBulkTag] = useState('');
     const [bulkMove, setBulkMove] = useState('');
     const [showBulkConfirm, setShowBulkConfirm] = useState(false);
-    const [pendingBulkAction, setPendingBulkAction] = useState(null);
-    const [tags, setTags] = useState([]);
-    const [showMenu, setShowMenu] = useState(null);
-    const [itStaff, setItStaff] = useState([]);
+    const [pendingBulkAction, setPendingBulkAction] = useState<(() => Promise<void>) | null>(null);
+    const [tags, setTags] = useState<string[]>([]);
+    const [showMenu, setShowMenu] = useState<number | null>(null);
+    const [itStaff, setItStaff] = useState<Employee[]>([]);
     
-    const { authTokens, user, loading: authLoading } = useContext(AuthContext);
+    const { authTokens, user, loading: authLoading } = useAuth();
     const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
     const priorityOptions = [
@@ -128,12 +139,12 @@ export default function CurrentTickets() {
         setTags(['Bug', 'Feature', 'Customer', 'Internal']);
     }, []);
 
-    const handleTicketUpdate = async (ticketId, field, value) => {
+    const handleTicketUpdate = async (ticketId: number, field: string, value: string | number) => {
         setAssigningTicket(null);
         try {
             const formData = new FormData();
             const fieldName = field === 'agent' ? 'agent_id' : field;
-            formData.append(fieldName, value);
+            formData.append(fieldName, String(value));
             
             const response = await fetch(`${API_URL}/api/incidents/${ticketId}/`, {
                 method: 'PATCH',

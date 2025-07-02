@@ -1,11 +1,10 @@
-import React, { useContext } from 'react';
 import { NavLink, Link } from 'react-router-dom';
 import { FaHome, FaTicketAlt, FaPlus, FaBox, FaSignOutAlt } from 'react-icons/fa';
-import AuthContext from '../context/AuthContext.jsx';
+import { useAuth } from '../context/AuthContext';
 
 export default function Sidebar() {
-  const { user, logoutUser } = useContext(AuthContext);
-  const isITStaff = user?.groups?.includes('IT Staff') || user?.is_superuser;
+  const { user, logoutUser } = useAuth();
+  const isITStaff = user?.is_it_staff;
 
   const baseLinkClass = 'flex items-center px-4 py-2.5 rounded-md text-sm font-medium transition-colors text-text-on-sidebar/70 hover:bg-sidebar-hover hover:text-text-on-sidebar';
   const activeLinkClass = 'bg-primary text-white';

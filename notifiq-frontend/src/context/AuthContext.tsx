@@ -1,22 +1,42 @@
-import React, { createContext, useState, useEffect } from 'react';
+import React, { createContext, useState, useEffect, ReactNode } from 'react';
 import { jwtDecode } from 'jwt-decode';
 import { useNavigate } from 'react-router-dom';
 
-const AuthContext = createContext();
+import { User, AuthTokens } from '../types';
+
+export interface AuthContextType {
+    user: User | null;
+    authTokens: AuthTokens | null;
+    loginUser: (username: string, password: string) => Promise<boolean>;
+    logoutUser: () => void;
+    loading?: boolean;
+}
+
+interface AuthProviderProps {
+    children: ReactNode;
+}
+
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
-export const AuthProvider = ({ children }) => {
-    const [authTokens, setAuthTokens] = useState(() => 
-        localStorage.getItem('authTokens') ? JSON.parse(localStorage.getItem('authTokens')) : null
-    );
-    const [user, setUser] = useState(() => 
-        localStorage.getItem('authTokens') ? jwtDecode(localStorage.getItem('authTokens')) : null
-    );
+export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
+    const [authTokens, setAuthTokens] = useState<AuthTokens | null>(() => {
+        const tokens = localStorage.getItem('authTokens');
+        return tokens ? JSON.parse(tokens) : null;
+    });
+    const [user, setUser] = useState<User | null>(() => {
+        const tokens = localStorage.getItem('authTokens');
+        if (tokens) {
+            const parsed = JSON.parse(tokens);
+            return jwtDecode<User>(parsed.access);
+        }
+        return null;
+    });
     const [loading, setLoading] = useState(true);
 
     const navigate = useNavigate();
 
-    const loginUser = async (username, password) => {
+    const loginUser = async (username: string, password: string): Promise<boolean> => {
         const response = await fetch(`${API_URL}/api/token/`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -26,7 +46,7 @@ export const AuthProvider = ({ children }) => {
 
         if(response.status === 200){
             setAuthTokens(data);
-            setUser(jwtDecode(data.access));
+            setUser(jwtDecode<User>(data.access));
             localStorage.setItem('authTokens', JSON.stringify(data));
             navigate('/dashboard');
             return true;
@@ -58,7 +78,7 @@ export const AuthProvider = ({ children }) => {
         
         if (response.status === 200) {
             setAuthTokens(data);
-            setUser(jwtDecode(data.access));
+            setUser(jwtDecode<User>(data.access));
             localStorage.setItem('authTokens', JSON.stringify(data));
         } else {
             logoutUser();
@@ -69,11 +89,12 @@ export const AuthProvider = ({ children }) => {
         }
     };
 
-    const contextData = {
+    const contextData: AuthContextType = {
         user,
         authTokens,
         loginUser,
         logoutUser,
+        loading,
     };
 
     useEffect(() => {
@@ -86,7 +107,7 @@ export const AuthProvider = ({ children }) => {
         }
         
         const fourMinutes = 1000 * 60 * 4;
-        let interval = setInterval(() => {
+        const interval = setInterval(() => {
             if (authTokens) {
                 updateToken();
             }
@@ -102,6 +123,15 @@ export const AuthProvider = ({ children }) => {
             {loading ? null : children}
         </AuthContext.Provider>
     );
+};
+
+// Custom hook to use the auth context
+export const useAuth = (): AuthContextType => {
+    const context = React.useContext(AuthContext);
+    if (context === undefined) {
+        throw new Error('useAuth must be used within an AuthProvider');
+    }
+    return context;
 };
 
 export default AuthContext;
